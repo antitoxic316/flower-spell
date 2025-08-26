@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <ncurses.h>
 
+#include "image.h"
 
 struct reactive_keys_args {
 	bool q_key_pressed;
@@ -11,27 +12,28 @@ struct reactive_keys_args {
 
 
 void* user_input_reader(void *argv);
-int** init_bit_map(void);
-void test_show_bitmap(int**);
+char** init_char_map(uint32_t w, uint32_t h);
+void show_char_map(char**, uint32_t w, uint32_t h);
 
 
 int main(int argc, char *argv[]){
     initscr();    
 
-    int** bit_map = init_bit_map();
+    char** char_map = init_char_map(COLS, LINES);
+
+    //char_map = img_to_ascii(char_map, COLS, LINES);
 
     struct reactive_keys_args key_args;    
     key_args.q_key_pressed = false;
 
 	while(true){
-        test_show_bitmap(bit_map);
+        show_char_map(char_map, COLS, LINES);
 
         refresh();
 
         pthread_t thread_io;
         pthread_create(&thread_io, NULL, &user_input_reader, (void *)&key_args);
         pthread_join(thread_io, NULL);
-
         if (key_args.q_key_pressed){
             break; 
         }
@@ -59,22 +61,31 @@ void* user_input_reader(void *argv){
 }
 
 
-int** init_bit_map(void){
-    int **bit_map = malloc(LINES * sizeof(int*));
+char** init_char_map(uint32_t w, uint32_t h){
+    char **char_map = malloc(h * sizeof(char*));
     
-    for(int i = 0; i < LINES; i++){
-        int *initiated_line = calloc(COLS, sizeof(int));
-        bit_map[i] = initiated_line;
-
+    for(int i = 0; i < h; i++){
+        char *initiated_line = calloc(w, sizeof(char));
+        char_map[i] = initiated_line;
     }
 
-    return bit_map;
+    return char_map;
 }
 
-void test_show_bitmap(int** bit_map){
-    for(int i = 0; i < LINES; i++){
-        for(int j = 0; j < COLS; j++){
-            printw("%d", bit_map[i][j]);
+void show_char_map(char** char_map, uint32_t w, uint32_t h){
+    //bitmap cropping to termianal size
+    uint32_t w_drw_lim = w;
+    uint32_t h_drw_lim = h;
+    if(w > COLS){
+        w_drw_lim = COLS;
+    }
+    if(h > LINES){
+        h_drw_lim = LINES;
+    }
+
+    for(int i = 0; i < h_drw_lim; i++){
+        for(int j = 0; j < w_drw_lim; j++){
+            printw("%d", char_map[i][j]);
         }
         //printw("\n");
     }
