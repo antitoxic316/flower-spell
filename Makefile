@@ -1,15 +1,22 @@
 
+
+
 all: main
 
-main: main.o image
-	cc -lncurses main.o -o main
+main: main.o image.o ascii.o
+	cc -Wall main.o image.o ascii.o -o main `MagickCore-config --ldflags --libs` -lncurses -lm
 
 main.o: main.c
-	cc -c main.c -o main.o
+	cc -Wall -g `MagickCore-config --cflags --cppflags` -c main.c -o main.o
 
-image: image.c image.h
-	cc `MagickCore-config --cflags --cppflags` -O2 -o image image.c `MagickCore-config --ldflags --libs`
+image: image.o ascii.o
+	cc -Wall image.o ascii.o -o image `MagickCore-config --ldflags --libs` -lncurses -lm
 
+image.o: image.c image.h
+	cc -Wall -g `MagickCore-config --cflags --cppflags` -c image.c -o image.o
+
+ascii.o: ascii.c ascii.h
+	cc -Wall -g -c ascii.c -o ascii.o
 
 clean:
-	rm -f main.o main image
+	rm -f *.o main

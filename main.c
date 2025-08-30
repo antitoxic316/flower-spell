@@ -2,32 +2,62 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <stdbool.h>
-#include <ncurses.h>
 
+#include "ascii.h"
 #include "image.h"
 
 struct reactive_keys_args {
 	bool q_key_pressed;
+    bool w_key_pressed;
 };
 
 
 void* user_input_reader(void *argv);
-char** init_char_map(uint32_t w, uint32_t h);
-void show_char_map(char**, uint32_t w, uint32_t h);
 
+int main(int argc, char *argv[]){    
+    initscr();
 
-int main(int argc, char *argv[]){
-    initscr();    
+    char **bg_ascii_map;
+    size_t bg_w, bg_h;
 
-    char** char_map = init_char_map(COLS, LINES);
+    char** frame_ascii_map;
+    size_t frame_w, frame_h;
 
-    //char_map = img_to_ascii(char_map, COLS, LINES);
+    Image *frame_list;
+    Image *frame;
+    int frame_i = 0;
 
     struct reactive_keys_args key_args;    
+    
+    bg_ascii_map = ascii_map_init(COLS, LINES);
+    bg_w = COLS;
+    bg_h = LINES;
+
+    frame_list = img_generate_sprite_frames("flower1.png");
+    frame = GetImageFromList(frame_list, frame_i);
+    if(frame == NULL){
+        printf("failed to parse frame1\n");
+        return -1;
+    }
+
+    img_transform_to_ascii(frame, &frame_ascii_map, &frame_w, &frame_h);
+    ascii_map_draw_on(
+        bg_ascii_map, bg_w, bg_h,
+        frame_ascii_map, frame_w, frame_h,
+        bg_w/2, bg_h/2
+    );
+
+    ascii_map_draw_on(
+        bg_ascii_map, bg_w, bg_h,
+        frame_ascii_map, frame_w, frame_h,
+        0, bg_h-frame_h
+    );
+
     key_args.q_key_pressed = false;
+    key_args.w_key_pressed = false;
 
 	while(true){
-        show_char_map(char_map, COLS, LINES);
+        ascii_map_print(bg_ascii_map, bg_w, bg_h);
 
         refresh();
 
@@ -36,6 +66,24 @@ int main(int argc, char *argv[]){
         pthread_join(thread_io, NULL);
         if (key_args.q_key_pressed){
             break; 
+        }
+        if(key_args.w_key_pressed){
+            frame_i++;
+            frame = GetImageFromList(frame_list, frame_i);
+            if(!frame){
+                frame_i = 0;
+                continue;
+            }
+            
+            // FULLY FREE CHARMAP HERE
+            img_transform_to_ascii(frame, &frame_ascii_map, &frame_w, &frame_h);
+            ascii_map_draw_on(
+                bg_ascii_map, bg_w, bg_h,
+                frame_ascii_map, frame_w, frame_h,
+                bg_w/2, bg_h/2
+            );
+
+            clear();
         }
     }
     
@@ -53,40 +101,11 @@ void* user_input_reader(void *argv){
 
     scanf("%c", &input_reading);
     fflush(stdin);
-    if (input_reading == 'q')
-        //printf("%d\n", args -> q_key_pressed);
-        args -> q_key_pressed = true;
+    if (input_reading == 'q') {
+        args->q_key_pressed = true;
+    } else if( input_reading == 'w'){
+        args->w_key_pressed = true;
+    }
     
     pthread_exit(NULL);
-}
-
-
-char** init_char_map(uint32_t w, uint32_t h){
-    char **char_map = malloc(h * sizeof(char*));
-    
-    for(int i = 0; i < h; i++){
-        char *initiated_line = calloc(w, sizeof(char));
-        char_map[i] = initiated_line;
-    }
-
-    return char_map;
-}
-
-void show_char_map(char** char_map, uint32_t w, uint32_t h){
-    //bitmap cropping to termianal size
-    uint32_t w_drw_lim = w;
-    uint32_t h_drw_lim = h;
-    if(w > COLS){
-        w_drw_lim = COLS;
-    }
-    if(h > LINES){
-        h_drw_lim = LINES;
-    }
-
-    for(int i = 0; i < h_drw_lim; i++){
-        for(int j = 0; j < w_drw_lim; j++){
-            printw("%d", char_map[i][j]);
-        }
-        //printw("\n");
-    }
 }
