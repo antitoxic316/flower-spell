@@ -17,47 +17,22 @@ void* user_input_reader(void *argv);
 int main(int argc, char *argv[]){    
     initscr();
 
-    char **bg_ascii_map;
-    size_t bg_w, bg_h;
+    struct ascii_canvas *canv;
 
-    char** frame_ascii_map;
-    size_t frame_w, frame_h;
-
-    Image *frame_list;
-    Image *frame;
-    int frame_i = 0;
+    struct char_img *ch_i, *ch_i2;
 
     struct reactive_keys_args key_args;    
     
-    bg_ascii_map = ascii_map_init(COLS, LINES);
-    bg_w = COLS;
-    bg_h = LINES;
+    canv = ascii_canvas_new(COLS, LINES);
 
-    frame_list = img_generate_sprite_frames("flower1.png");
-    frame = GetImageFromList(frame_list, frame_i);
-    if(frame == NULL){
-        printf("failed to parse frame1\n");
-        return -1;
-    }
-
-    img_transform_to_ascii(frame, &frame_ascii_map, &frame_w, &frame_h);
-    ascii_map_draw_on(
-        bg_ascii_map, bg_w, bg_h,
-        frame_ascii_map, frame_w, frame_h,
-        bg_w/2, bg_h/2
-    );
-
-    ascii_map_draw_on(
-        bg_ascii_map, bg_w, bg_h,
-        frame_ascii_map, frame_w, frame_h,
-        0, bg_h-frame_h
-    );
+    ch_i = char_img_new_from_file("flower1.png");
+    ch_i2 = char_img_new_from_file("flower1.png");
 
     key_args.q_key_pressed = false;
     key_args.w_key_pressed = false;
 
 	while(true){
-        ascii_map_print(bg_ascii_map, bg_w, bg_h);
+        ascii_canvas_print(canv);
 
         refresh();
 
@@ -68,21 +43,14 @@ int main(int argc, char *argv[]){
             break; 
         }
         if(key_args.w_key_pressed){
-            frame_i++;
-            frame = GetImageFromList(frame_list, frame_i);
-            if(!frame){
-                frame_i = 0;
-                continue;
-            }
-            
-            // FULLY FREE CHARMAP HERE
-            img_transform_to_ascii(frame, &frame_ascii_map, &frame_w, &frame_h);
-            ascii_map_draw_on(
-                bg_ascii_map, bg_w, bg_h,
-                frame_ascii_map, frame_w, frame_h,
-                bg_w/2, bg_h/2
+            char_img_next_frame(ch_i);
+            ascii_canvas_draw_on(
+                canv, ch_i, canv->bg_image->w/2, canv->bg_image->h/2
             );
-
+            char_img_next_frame(ch_i2);
+            ascii_canvas_draw_on(
+                canv, ch_i2, canv->bg_image->w/8, canv->bg_image->h-28
+            );
             clear();
         }
     }

@@ -5,7 +5,6 @@
 #include <MagickCore/MagickCore.h>
 
 #include "image.h"
-#include "ascii.h"
 
 #define SPRITE_SIZE 16
 
@@ -17,7 +16,7 @@
   }
 
 
-static double get_percieved_lightness(uint16_t r, uint16_t g, uint16_t b){
+double get_percieved_lightness(uint16_t r, uint16_t g, uint16_t b){
   double vR,vG,vB;
   double linR,linG,linB;
   double Y;
@@ -44,17 +43,15 @@ static double get_percieved_lightness(uint16_t r, uint16_t g, uint16_t b){
 }
 
 
-Image *img_generate_sprite_frames(char *source_filename)
+struct frame_list *frame_list_new_from_file(char *source_filename)
 {
-  ExceptionInfo
-    *exception;
+  ExceptionInfo *exception;
+  Image *image, *resized_images;
+  ImageInfo *image_info;
+  struct frame_list *fl;
 
-  Image
-    *image,
-    *resized_images;
-
-  ImageInfo
-    *image_info;
+  fl = malloc(sizeof(struct frame_list));
+  fl->frame_count = 0;
 
   MagickCoreGenesis(source_filename,MagickTrue);
   exception=AcquireExceptionInfo();
@@ -82,70 +79,42 @@ Image *img_generate_sprite_frames(char *source_filename)
 
     Image *cropped_img = CropImage(image, &rec, exception);
 
-    cropped_img=ResizeImage(cropped_img, rec.width * 1.5, rec.height, BoxFilter,exception);
-    if (cropped_img == (Image *) NULL)
+    cropped_img=ResizeImage(cropped_img, (float)rec.width * 1.8, rec.height, BoxFilter,exception);
+    if (cropped_img == (Image *) NULL){
       MagickError(exception->severity,exception->reason,exception->description);
+    }
 
     AppendImageToList(&resized_images, cropped_img);
     x += SPRITE_SIZE;
+
+    fl->frame_count++;
   }
-  
-// writing frames to seperate files 
-/*
-  int i = 0;
-  Image *sprite;
-  while((sprite = GetImageFromList(resized_images, i)) != (Image *) NULL){
-    char buff[64] = {'\0', };
-    snprintf(buff, 64, "%d.png", i);
-    strcpy(sprite->filename, buff);
-    WriteImage(image_info, sprite, exception);
-    i++;
-  }
-*/
-  
+
+  fl->frames = resized_images;
+  fl->frame_i = 0;
   
   image=DestroyImage(image);
   image_info=DestroyImageInfo(image_info);
   exception=DestroyExceptionInfo(exception);
   MagickCoreTerminus();
 
-  return resized_images;
+  return fl;
 }
 
-void img_transform_to_ascii(
-  Image *img, 
-  char ***char_map, 
-  size_t *w, 
-  size_t *h
-){
-  const Quantum *pixels_q;
-  ExceptionInfo *ex;
-
-  printf("img: %d %d\n", img->columns, img->rows);
-
-  char **cm = ascii_map_init(img->columns, img->rows);
-
-  pixels_q = GetVirtualPixels(img, 0, 0, img->columns, img->rows, ex);
-
-  int pxl_c = 0;
-
-  for(size_t y = 0; y < (size_t) img->rows; y++){
-    for(size_t x = 0; x < (size_t) img->columns; x++){
-      unsigned offset = GetPixelChannels(img) * (img->columns * y + x);
-
-      uint16_t r = pixels_q[offset];
-      uint16_t g = pixels_q[offset+1];
-      uint16_t b = pixels_q[offset+2];
-
-      double Y_st = get_percieved_lightness(r,g,b);
-
-
-      int br = (int)(Y_st/10);
-      cm[y][x] = ascii_br[br];
-    }
+Image *frame_list_turn_frame(struct frame_list *fl){
+  if(fl->frame_i >= fl->frame_count){
+    return NULL;
   }
 
-  *w = img->columns;
-  *h = img->rows;
-  *char_map = cm;
+  Image *frame;
+
+  frame = GetImageFromList(fl->frames, fl->frame_i);
+  if(frame == NULL){
+      printf("failed to parse frame\n");
+      return NULL;
+  }
+
+  fl->frame_i++;
+
+  return frame;
 }

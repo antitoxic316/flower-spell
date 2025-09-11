@@ -8,7 +8,7 @@
 char ascii_br[10] = {' ','.',':','-','=','+','*','#','%','@'};
 int horizon_line = 20;
 
-int ascii_map_get_brightness_lv(char ch){
+int ascii_canvas_get_brightness_lv(char ch){
   int br = -1;
   for(int ii = br; ii < 10; ii++){
     if(ch == ascii_br[ii]){
@@ -20,74 +20,207 @@ int ascii_map_get_brightness_lv(char ch){
   return br;
 }
 
-char** ascii_map_init(uint32_t w, uint32_t h){
-    char **char_map = malloc(h * sizeof(char*));
-    
-    for(int i = 0; i < h; i++){
-        char *initiated_line = calloc(w, sizeof(char));
-        if(i > horizon_line){
-          memset(initiated_line, ascii_br[1], w);
-        } else {
-          memset(initiated_line, ascii_br[0], w);
-        }
-        char_map[i] = initiated_line;
-    }
+struct char_img *canvas_background_new(size_t w, size_t h){
+  struct char_img *ch_img = malloc(sizeof(struct char_img));
+  char **char_map = malloc(h * sizeof(char*));
+  
+  for(int i = 0; i < h; i++){
+      char *initiated_line = calloc(w, sizeof(char));
+      if(i > horizon_line){
+        memset(initiated_line, ascii_br[1], w);
+      } else {
+        memset(initiated_line, ascii_br[0], w);
+      }
+      char_map[i] = initiated_line;
+  }
 
-    return char_map;
+  ch_img->ch_m = char_map;
+  ch_img->w = w;
+  ch_img->h = h;
+  ch_img->id = 0;
+
+  return ch_img;
 }
 
-void ascii_map_draw_on(
-  char **arr1, size_t w1, size_t h1,
-  char **arr2, size_t w2, size_t h2,
-  int x, int y
-)
+struct ascii_canvas *ascii_canvas_new(uint32_t width, uint32_t height){
+  struct ascii_canvas *canv = malloc(sizeof (struct ascii_canvas));
+
+  canv->bg_image = canvas_background_new(width, height);
+  canv->images_list = NULL;
+  canv->images_count = 0;
+
+  return canv;
+}
+
+void ascii_canvas_draw_on(struct ascii_canvas *canv, struct char_img *img, int x, int y)
 {
-  if(w1 < w2 || h1 < h2){
-    printf("ascii_map_draw_on error: arr2 should be smaller then arr1");
+  if(canv->bg_image->w < img->w || canv->bg_image->h < img->h){
+    printf("ascii_canvas_draw_on error: img->ch_m should be smaller then canv->ch_m");
     return;
   }
-  if(x >= w1 || y >= h1){
-    printf("ascii_map_draw_on error: out of bounds draw");
+  if(x >= canv->bg_image->w || y >= canv->bg_image->h){
+    printf("ascii_canvas_draw_on error: out of bounds draw");
   }
   
-  for(int i = 0; i < h2; i++){
-    if(i+y >= h1){
+  for(int i = 0; i < img->h; i++){
+    if(i+y >= canv->bg_image->h){
       break;
     }
-    for(int j = 0; j < w2; j++){
-      if(j+x >= w1){
+    for(int j = 0; j < img->w; j++){
+      if(j+x >= canv->bg_image->w){
         break;
       }
 
 
       // Don't override brightness level
       // so background can be saved
-      int br_bg = ascii_map_get_brightness_lv(arr1[i+y][j+x]);
-      int br_img = ascii_map_get_brightness_lv(arr2[i][j]);
-
+      int br_bg = ascii_canvas_get_brightness_lv(canv->bg_image->ch_m[i+y][j+x]);
+      int br_img = ascii_canvas_get_brightness_lv(img->ch_m[i][j]);
       if(br_bg > br_img){
         continue;
       }
 
-      arr1[i+y][j+x] = arr2[i][j];
+      canv->bg_image->ch_m[i+y][j+x] = img->ch_m[i][j];
     }
   }
 }
 
-void ascii_map_print(char** char_map, uint32_t w, uint32_t h){
+void ascii_canvas_print(struct ascii_canvas *canv){
     //bitmap cropping to termianal size
-    uint32_t w_drw_lim = w;
-    uint32_t h_drw_lim = h;
-    if(w > COLS){
+    uint32_t w_drw_lim = canv->bg_image->w;
+    uint32_t h_drw_lim = canv->bg_image->h;
+    if(canv->bg_image->w > COLS){
         w_drw_lim = COLS;
     }
-    if(h > LINES){
+    if(canv->bg_image->h > LINES){
         h_drw_lim = LINES;
     }
 
     for(int i = 0; i < h_drw_lim; i++){
         for(int j = 0; j < w_drw_lim; j++){
-            printw("%c", char_map[i][j]);
+            printw("%c", canv->bg_image->ch_m[i][j]);
         }
     }
 } 
+
+void ascii_canvas_free(struct ascii_canvas *canv){
+  for(int i = 0; i < canv->images_count; i++){
+    char_img_free(canv->images_list[i]);
+  }
+  char_img_free(canv->bg_image);
+
+  free(canv);
+}
+
+//helper function for frame switching
+//char map will be the same size as img dimensions
+char **char_map_new_from_image(Image *img){
+  const Quantum *pixels_q;
+  ExceptionInfo *ex;
+
+  char **ch_m = malloc(sizeof(char*) * img->rows);
+
+  for(int i = 0; i < img->rows; i++){
+      char *initiated_line = calloc(img->columns, sizeof(char));
+      memset(initiated_line, ascii_br[0], img->columns);
+      ch_m[i] = initiated_line;
+  }
+
+  pixels_q = GetVirtualPixels(img, 0, 0, img->columns, img->rows, ex);
+
+  int pxl_c = 0;
+
+  for(size_t y = 0; y < (size_t) img->rows; y++){
+    for(size_t x = 0; x < (size_t) img->columns; x++){
+      unsigned offset = GetPixelChannels(img) * (img->columns * y + x);
+
+      uint16_t r = pixels_q[offset];
+      uint16_t g = pixels_q[offset+1];
+      uint16_t b = pixels_q[offset+2];
+
+      double Y_st = get_percieved_lightness(r,g,b);
+
+      int br = (int)(Y_st/10);
+      ch_m[y][x] = ascii_br[br];
+    }
+  }
+
+  return ch_m;
+}
+
+struct char_img *char_img_new_from_file(char *filename){
+  struct char_img *ch_img = malloc(sizeof(struct char_img));
+
+  ch_img->fl = frame_list_new_from_file(filename);
+  Image *first_frame = frame_list_turn_frame(ch_img->fl);
+  ch_img->fl->frame_i--;
+
+  ch_img->ch_m = char_map_new_from_image(first_frame);
+  ch_img->w = first_frame->columns;
+  ch_img->h = first_frame->rows;
+  ch_img->id = (int)100*rand();
+  
+  return ch_img;
+}
+
+void char_img_free(struct char_img* ch_i){
+  for(int i = 0; i < ch_i->h; i++){
+    free(ch_i->ch_m[i]);
+  }
+  free(ch_i->ch_m);
+
+  //frame_list_free(ch_i->fl);
+
+  free(ch_i);
+}
+
+/*
+//helper function for char_img_next_frame
+struct char_img *char_img_new_from_pixels(Image *img){
+  const Quantum *pixels_q;
+  ExceptionInfo *ex;
+
+  //printf("img: %d %d\n", img->columns, img->rows);
+
+  struct char_img *ascii_img = char_img_new(img->columns, img->rows);
+
+  pixels_q = GetVirtualPixels(img, 0, 0, img->columns, img->rows, ex);
+
+  int pxl_c = 0;
+
+  for(size_t y = 0; y < (size_t) img->rows; y++){
+    for(size_t x = 0; x < (size_t) img->columns; x++){
+      unsigned offset = GetPixelChannels(img) * (img->columns * y + x);
+
+      uint16_t r = pixels_q[offset];
+      uint16_t g = pixels_q[offset+1];
+      uint16_t b = pixels_q[offset+2];
+
+      double Y_st = get_percieved_lightness(r,g,b);
+
+      int br = (int)(Y_st/10);
+      ascii_img->ch_m[y][x] = ascii_br[br];
+    }
+  }
+
+  return ascii_img;
+}
+*/
+
+
+void char_img_next_frame(struct char_img *ch_i){
+  Image *next_frame = frame_list_turn_frame(ch_i->fl);
+  
+  if(!next_frame){
+    return;
+  }
+
+  for(int i = 0; i < ch_i->h; i++){
+    free(ch_i->ch_m[i]);
+  }
+  free(ch_i->ch_m);
+
+  char **new_ch_m = char_map_new_from_image(next_frame);
+
+  ch_i->ch_m = new_ch_m;
+}
