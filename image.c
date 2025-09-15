@@ -2,11 +2,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdbool.h>
 #include <MagickCore/MagickCore.h>
 
 #include "image.h"
 
-#define SPRITE_SIZE 16
+#define ASSIGN_MAX(a, b) if(a < b){ a = b; }
+#define ASSIGN_MIN(a, b) if(a > b){ a = b; } 
 
 #define GAMMA_COLOR_TO_LIN(colorChannel) \
   if ( colorChannel <= 0.04045 ) { \
@@ -42,6 +44,145 @@ double get_percieved_lightness(uint16_t r, uint16_t g, uint16_t b){
   }
 }
 
+int get_brightness_lv(const Quantum *pixels,unsigned offset, int max_lv){
+  uint16_t r = pixels[offset];
+  uint16_t g = pixels[offset+1];
+  uint16_t b = pixels[offset+2];
+
+  double Y_st = get_percieved_lightness(r,g,b);
+  int br = (int)(Y_st/max_lv);
+
+  return br;
+}
+
+//crops all the sprites to the box where all the rows and columns are used by the largest sprite
+void frame_list_cut_empty_space(struct frame_list *fl){
+  ExceptionInfo *ex;
+  int fl_st_u = INT32_MAX, fl_st_d = 0;
+  int fl_st_l = INT32_MAX, fl_st_r = 0;
+
+  ex = AcquireExceptionInfo();
+
+  //calculate largest needed box
+  for(int i = 0; i < fl->frame_count; i++) {
+    Image *img = GetImageFromList(fl->frames, i);
+    if (img == (Image *) NULL){
+      MagickError(ex->severity,ex->reason,ex->description);
+    }
+    bool met_sprite = false;
+    bool ended_sprite = false;
+    int spr_st_u = 0, spr_st_d = 0;
+    
+    for(int y = 0; y < img->rows; y++){
+      const Quantum *col_pixels;
+      col_pixels = GetVirtualPixels(img, 0, y, img->columns, y+1, ex);
+      if (col_pixels == (Quantum *) NULL){
+        MagickError(ex->severity,ex->reason,ex->description);
+      }
+      bool all_dark = true;
+
+      for(int x = 0; x < img->columns; x++){
+        unsigned offset = GetPixelChannels(img) * x;
+
+        int br = get_brightness_lv(col_pixels, offset, 10);
+        
+        if(br > 0){
+          all_dark = false;
+        }
+      } // x loop end
+      if(!all_dark && !met_sprite){
+        spr_st_u = y;
+        met_sprite = true;
+      }
+      if(!all_dark && met_sprite && ended_sprite){
+        ended_sprite = false;
+      }
+      if(all_dark && met_sprite && !ended_sprite){
+        spr_st_d = y;
+        ended_sprite = true;
+      }
+    } // y loop end
+    if(!ended_sprite){
+      spr_st_d = img->rows-1;
+    }
+    ASSIGN_MAX(fl_st_d, spr_st_d)
+    ASSIGN_MIN(fl_st_u, spr_st_u)
+  } // sprite loop end
+
+
+  for(int i = 0; i < fl->frame_count; i++) {
+    Image *img = GetImageFromList(fl->frames, i);
+    if (img == (Image *) NULL){
+      MagickError(ex->severity,ex->reason,ex->description);
+    }
+    bool met_sprite = false;
+    bool ended_sprite = false;
+    int spr_st_l = 0, spr_st_r = 0;
+    
+    for(int x = 0; x < img->columns; x++){
+      const Quantum *row_pixels;
+      row_pixels = GetVirtualPixels(img, x, 0, x+1, img->rows, ex);
+      if (row_pixels == (Quantum *) NULL){
+        MagickError(ex->severity,ex->reason,ex->description);
+      }
+      bool all_dark = true;
+
+      for(int y = 0; y < img->rows; y++){
+        unsigned offset = GetPixelChannels(img) * (img->columns * y + x);
+
+        int br = get_brightness_lv(row_pixels, offset, 10);
+        
+        if(br > 0){
+          all_dark = false;
+        }
+      } // y loop end
+      if(!all_dark && !met_sprite){
+        spr_st_l = x;
+        met_sprite = true;
+      }
+      if(!all_dark && met_sprite && ended_sprite){
+        ended_sprite = false;
+      }
+      if(all_dark && met_sprite && !ended_sprite){
+        spr_st_r = x;
+        ended_sprite = true;
+      }
+    } // x loop end
+    if(!ended_sprite){
+      spr_st_r = img->rows-1;
+    }
+    ASSIGN_MAX(fl_st_r, spr_st_r)
+    ASSIGN_MIN(fl_st_l, spr_st_l)
+  } // sprite loop end
+
+  //crop all the sprites
+  RectangleInfo rec;
+  rec.x = fl_st_l;
+  rec.y = fl_st_u;
+  rec.width = fl_st_r-fl_st_l;
+  rec.height = fl_st_d-fl_st_u;
+
+  Image *new_image_list = NewImageList();
+
+  for(int i = 0; i < fl->frame_count; i++){
+    Image *img = GetImageFromList(fl->frames, i);
+
+    //because CropImage changes page value
+    img->page.x = 0;
+    img->page.y = 0;
+    img->page.width = 0;
+    img->page.height = 0;
+    Image *cropped_img = CropImage(img, &rec, ex);
+
+    if (!cropped_img){
+      MagickError(ex->severity,ex->reason,ex->description);
+    }
+    AppendImageToList(&new_image_list, cropped_img);
+  }
+
+  DestroyImageList(fl->frames);
+  fl->frames = new_image_list;
+}
 
 struct frame_list *frame_list_new_from_file(char *source_filename)
 {
@@ -79,11 +220,10 @@ struct frame_list *frame_list_new_from_file(char *source_filename)
 
     Image *cropped_img = CropImage(image, &rec, exception);
 
-    cropped_img=ResizeImage(cropped_img, (float)rec.width * 1.8, rec.height, BoxFilter,exception);
+    cropped_img=ResizeImage(cropped_img, (float)rec.width * FONT_PROPOTION_BIAS, rec.height, BoxFilter, exception);
     if (cropped_img == (Image *) NULL){
       MagickError(exception->severity,exception->reason,exception->description);
     }
-
     AppendImageToList(&resized_images, cropped_img);
     x += SPRITE_SIZE;
 
@@ -92,6 +232,8 @@ struct frame_list *frame_list_new_from_file(char *source_filename)
 
   fl->frames = resized_images;
   fl->frame_i = 0;
+
+  frame_list_cut_empty_space(fl);
   
   image=DestroyImage(image);
   image_info=DestroyImageInfo(image_info);

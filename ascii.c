@@ -20,8 +20,8 @@ int ascii_canvas_get_brightness_lv(char ch){
   return br;
 }
 
-struct char_img *canvas_background_new(size_t w, size_t h){
-  struct char_img *ch_img = malloc(sizeof(struct char_img));
+struct char_gif *canvas_background_new(size_t w, size_t h){
+  struct char_gif *ch_img = malloc(sizeof(struct char_gif));
   char **char_map = malloc(h * sizeof(char*));
   
   for(int i = 0; i < h; i++){
@@ -52,7 +52,7 @@ struct ascii_canvas *ascii_canvas_new(uint32_t width, uint32_t height){
   return canv;
 }
 
-void ascii_canvas_draw_on(struct ascii_canvas *canv, struct char_img *img, int x, int y)
+void ascii_canvas_draw_on(struct ascii_canvas *canv, struct char_gif *img, int x, int y)
 {
   if(canv->bg_image->w < img->w || canv->bg_image->h < img->h){
     printf("ascii_canvas_draw_on error: img->ch_m should be smaller then canv->ch_m");
@@ -85,6 +85,28 @@ void ascii_canvas_draw_on(struct ascii_canvas *canv, struct char_img *img, int x
   }
 }
 
+void ascii_canvas_add_img(struct ascii_canvas *canv, struct char_gif *img, size_t x, size_t y){
+  canv->images_count++;
+  struct char_gif **new_img_l;
+  new_img_l = realloc(canv->images_list, canv->images_count*sizeof(struct char_gif*));
+  if(!new_img_l){
+    printf("realloc: failed to allocate memory");
+    return;
+  }
+  canv->images_list = new_img_l;
+  canv->images_list[canv->images_count-1] = img;
+  img->x = x;
+  img->y = y;
+}
+
+void ascii_canvas_progress_scene(struct ascii_canvas* canv){
+  for(int i = 0 ; i < canv->images_count; i++){
+      struct char_gif *ch_i = canv->images_list[i];
+      char_img_next_frame(ch_i);
+      ascii_canvas_draw_on(canv, ch_i, ch_i->x, ch_i->y); 
+  }
+}
+
 void ascii_canvas_print(struct ascii_canvas *canv){
     //bitmap cropping to termianal size
     uint32_t w_drw_lim = canv->bg_image->w;
@@ -100,6 +122,11 @@ void ascii_canvas_print(struct ascii_canvas *canv){
         for(int j = 0; j < w_drw_lim; j++){
             printw("%c", canv->bg_image->ch_m[i][j]);
         }
+    }
+
+    for(int i = 0; i < canv->images_count; i++){
+      struct char_gif *ch_i = canv->images_list[i];
+      ascii_canvas_draw_on(canv, ch_i, ch_i->x, ch_i->y); 
     }
 } 
 
@@ -118,6 +145,8 @@ char **char_map_new_from_image(Image *img){
   const Quantum *pixels_q;
   ExceptionInfo *ex;
 
+  ex = AcquireExceptionInfo();
+
   char **ch_m = malloc(sizeof(char*) * img->rows);
 
   for(int i = 0; i < img->rows; i++){
@@ -128,19 +157,11 @@ char **char_map_new_from_image(Image *img){
 
   pixels_q = GetVirtualPixels(img, 0, 0, img->columns, img->rows, ex);
 
-  int pxl_c = 0;
-
   for(size_t y = 0; y < (size_t) img->rows; y++){
     for(size_t x = 0; x < (size_t) img->columns; x++){
       unsigned offset = GetPixelChannels(img) * (img->columns * y + x);
 
-      uint16_t r = pixels_q[offset];
-      uint16_t g = pixels_q[offset+1];
-      uint16_t b = pixels_q[offset+2];
-
-      double Y_st = get_percieved_lightness(r,g,b);
-
-      int br = (int)(Y_st/10);
+      int br = get_brightness_lv(pixels_q, offset, 10);
       ch_m[y][x] = ascii_br[br];
     }
   }
@@ -148,8 +169,8 @@ char **char_map_new_from_image(Image *img){
   return ch_m;
 }
 
-struct char_img *char_img_new_from_file(char *filename){
-  struct char_img *ch_img = malloc(sizeof(struct char_img));
+struct char_gif *char_img_new_from_file(char *filename){
+  struct char_gif *ch_img = malloc(sizeof(struct char_gif));
 
   ch_img->fl = frame_list_new_from_file(filename);
   Image *first_frame = frame_list_turn_frame(ch_img->fl);
@@ -163,7 +184,7 @@ struct char_img *char_img_new_from_file(char *filename){
   return ch_img;
 }
 
-void char_img_free(struct char_img* ch_i){
+void char_img_free(struct char_gif* ch_i){
   for(int i = 0; i < ch_i->h; i++){
     free(ch_i->ch_m[i]);
   }
@@ -174,41 +195,7 @@ void char_img_free(struct char_img* ch_i){
   free(ch_i);
 }
 
-/*
-//helper function for char_img_next_frame
-struct char_img *char_img_new_from_pixels(Image *img){
-  const Quantum *pixels_q;
-  ExceptionInfo *ex;
-
-  //printf("img: %d %d\n", img->columns, img->rows);
-
-  struct char_img *ascii_img = char_img_new(img->columns, img->rows);
-
-  pixels_q = GetVirtualPixels(img, 0, 0, img->columns, img->rows, ex);
-
-  int pxl_c = 0;
-
-  for(size_t y = 0; y < (size_t) img->rows; y++){
-    for(size_t x = 0; x < (size_t) img->columns; x++){
-      unsigned offset = GetPixelChannels(img) * (img->columns * y + x);
-
-      uint16_t r = pixels_q[offset];
-      uint16_t g = pixels_q[offset+1];
-      uint16_t b = pixels_q[offset+2];
-
-      double Y_st = get_percieved_lightness(r,g,b);
-
-      int br = (int)(Y_st/10);
-      ascii_img->ch_m[y][x] = ascii_br[br];
-    }
-  }
-
-  return ascii_img;
-}
-*/
-
-
-void char_img_next_frame(struct char_img *ch_i){
+void char_img_next_frame(struct char_gif *ch_i){
   Image *next_frame = frame_list_turn_frame(ch_i->fl);
   
   if(!next_frame){
