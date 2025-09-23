@@ -22,8 +22,9 @@ void draw_random_image(struct ascii_canvas *canv){
     int x = rand() % ((COLS - ch_i->w/2) + 1);
     int y = rand() % ((LINES - ch_i->h/2) + 1 - horizon_line) + horizon_line; 
 
-    ascii_canvas_add_img(canv, ch_i, x, y); 
-    ascii_canvas_draw_on(canv, ch_i, ch_i->x, ch_i->y);
+    ascii_canvas_add_img(canv, ch_i);
+    char_gif_move(canv, ch_i, x, y); 
+    ascii_canvas_draw_on(canv, ch_i);
 }
 
 

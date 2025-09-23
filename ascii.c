@@ -4,9 +4,12 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 char ascii_br[10] = {' ','.',':','-','=','+','*','#','%','@'};
-int horizon_line = 20;
+int horizon_line = 18;
+
+int view_plane_z = 12;
 
 int ascii_canvas_get_brightness_lv(char ch){
   int br = -1;
@@ -18,125 +21,6 @@ int ascii_canvas_get_brightness_lv(char ch){
   }
 
   return br;
-}
-
-struct char_gif *canvas_background_new(size_t w, size_t h){
-  struct char_gif *ch_img = malloc(sizeof(struct char_gif));
-  char **char_map = malloc(h * sizeof(char*));
-  
-  for(int i = 0; i < h; i++){
-      char *initiated_line = calloc(w, sizeof(char));
-      if(i > horizon_line){
-        memset(initiated_line, ascii_br[1], w);
-      } else {
-        memset(initiated_line, ascii_br[0], w);
-      }
-      char_map[i] = initiated_line;
-  }
-
-  ch_img->ch_m = char_map;
-  ch_img->w = w;
-  ch_img->h = h;
-  ch_img->id = 0;
-
-  return ch_img;
-}
-
-struct ascii_canvas *ascii_canvas_new(uint32_t width, uint32_t height){
-  struct ascii_canvas *canv = malloc(sizeof (struct ascii_canvas));
-
-  canv->bg_image = canvas_background_new(width, height);
-  canv->images_list = NULL;
-  canv->images_count = 0;
-
-  return canv;
-}
-
-void ascii_canvas_draw_on(struct ascii_canvas *canv, struct char_gif *img, int x, int y)
-{
-  if(canv->bg_image->w < img->w || canv->bg_image->h < img->h){
-    printf("ascii_canvas_draw_on error: img->ch_m should be smaller then canv->ch_m");
-    return;
-  }
-  if(x >= canv->bg_image->w || y >= canv->bg_image->h){
-    printf("ascii_canvas_draw_on error: out of bounds draw");
-  }
-  
-  for(int i = 0; i < img->h; i++){
-    if(i+y >= canv->bg_image->h){
-      break;
-    }
-    for(int j = 0; j < img->w; j++){
-      if(j+x >= canv->bg_image->w){
-        break;
-      }
-
-
-      // Don't override brightness level
-      // so background can be saved
-      int br_bg = ascii_canvas_get_brightness_lv(canv->bg_image->ch_m[i+y][j+x]);
-      int br_img = ascii_canvas_get_brightness_lv(img->ch_m[i][j]);
-      if(br_bg > br_img){
-        continue;
-      }
-
-      canv->bg_image->ch_m[i+y][j+x] = img->ch_m[i][j];
-    }
-  }
-}
-
-void ascii_canvas_add_img(struct ascii_canvas *canv, struct char_gif *img, size_t x, size_t y){
-  canv->images_count++;
-  struct char_gif **new_img_l;
-  new_img_l = realloc(canv->images_list, canv->images_count*sizeof(struct char_gif*));
-  if(!new_img_l){
-    printf("realloc: failed to allocate memory");
-    return;
-  }
-  canv->images_list = new_img_l;
-  canv->images_list[canv->images_count-1] = img;
-  img->x = x;
-  img->y = y;
-}
-
-void ascii_canvas_progress_scene(struct ascii_canvas* canv){
-  for(int i = 0 ; i < canv->images_count; i++){
-      struct char_gif *ch_i = canv->images_list[i];
-      char_img_next_frame(ch_i);
-      ascii_canvas_draw_on(canv, ch_i, ch_i->x, ch_i->y); 
-  }
-}
-
-void ascii_canvas_print(struct ascii_canvas *canv){
-    //bitmap cropping to termianal size
-    uint32_t w_drw_lim = canv->bg_image->w;
-    uint32_t h_drw_lim = canv->bg_image->h;
-    if(canv->bg_image->w > COLS){
-        w_drw_lim = COLS;
-    }
-    if(canv->bg_image->h > LINES){
-        h_drw_lim = LINES;
-    }
-
-    for(int i = 0; i < h_drw_lim; i++){
-        for(int j = 0; j < w_drw_lim; j++){
-            printw("%c", canv->bg_image->ch_m[i][j]);
-        }
-    }
-
-    for(int i = 0; i < canv->images_count; i++){
-      struct char_gif *ch_i = canv->images_list[i];
-      ascii_canvas_draw_on(canv, ch_i, ch_i->x, ch_i->y); 
-    }
-} 
-
-void ascii_canvas_free(struct ascii_canvas *canv){
-  for(int i = 0; i < canv->images_count; i++){
-    char_img_free(canv->images_list[i]);
-  }
-  char_img_free(canv->bg_image);
-
-  free(canv);
 }
 
 //helper function for frame switching
@@ -169,6 +53,185 @@ char **char_map_new_from_image(Image *img){
   return ch_m;
 }
 
+struct char_gif *canvas_background_new(size_t w, size_t h){
+  struct char_gif *ch_img = malloc(sizeof(struct char_gif));
+  char **char_map = malloc(h * sizeof(char*));
+  
+  for(int i = 0; i < h; i++){
+      char *initiated_line = calloc(w, sizeof(char));
+      if(i > horizon_line){
+        memset(initiated_line, ascii_br[1], w);
+      } else {
+        memset(initiated_line, ascii_br[0], w);
+      }
+      char_map[i] = initiated_line;
+  }
+
+  ch_img->ch_m = char_map;
+  ch_img->w = w;
+  ch_img->h = h;
+  ch_img->id = 0;
+
+  return ch_img;
+}
+
+void char_gif_free_current_char_map(struct char_gif* chg){
+  for(int i = 0; i < chg->h; i++){
+      free(chg->ch_m[i]);
+  }
+  free(chg->ch_m);
+}
+
+struct ascii_canvas *ascii_canvas_new(uint32_t width, uint32_t height){
+  struct ascii_canvas *canv = malloc(sizeof (struct ascii_canvas));
+
+  canv->bg_image = canvas_background_new(width, height);
+  canv->images_list = NULL;
+  canv->images_count = 0;
+
+  canv->viewerX = width / 2;
+
+  return canv;
+}
+
+double vecLen(int x1, int y1, int z1, int x2, int y2, int z2){
+  double s = pow(x2 - x1, 2) + pow(y2 - y1, 2) + pow(z2 - z1, 2);
+  return sqrt(s);
+}
+
+void resize_based_on_distance(struct ascii_canvas *canv, struct char_gif *img){
+  ExceptionInfo *ex;
+  int persp_h;
+
+  ex = AcquireExceptionInfo();
+
+  persp_h = ceil(((double)(img->h * view_plane_z)) / vecLen(
+    0, canv->viewerX, 0, img->xR, img->yR, img->zR
+  ));
+
+  img->h = (int)persp_h;
+  
+	for(int i = 0; i < img->fl->frame_count; i++){
+    Image *pxl = GetImageFromList(img->fl->frames, i);
+    pxl = ResizeImage(pxl, img->w, img->h, BohmanFilter, ex);
+    if (!pxl){
+      MagickError(ex->severity,ex->reason,ex->description);
+      exit(1);
+    }
+
+    char **ch_m_new = char_map_new_from_image(pxl);
+    char_gif_free_current_char_map(img);
+
+    img->ch_m = ch_m_new;
+  }
+}
+
+void char_gif_move(struct ascii_canvas* canv, struct char_gif *chg, int x, int y){
+  chg->x = x;
+  chg->y = y;
+
+  //real coords are calculated from canvas ones
+  //should not work if object is above the ground
+
+  //left top corner is 0,0
+  if(y > horizon_line){ //the object is on the ground
+    chg->yR = 0;
+    int obj_d = (canv->bg_image->h - y);
+    chg->zR = pow(obj_d, 2);
+
+    int realOffsetX = chg->zR * (x - canv->viewerX) / view_plane_z;
+
+    chg->xR = canv->viewerX - realOffsetX;
+  }
+}
+
+void ascii_canvas_draw_on(struct ascii_canvas *canv, struct char_gif *img)
+{
+  if(canv->bg_image->w < img->w || canv->bg_image->h < img->h){
+    printf("ascii_canvas_draw_on error: img->ch_m should be smaller then canv->ch_m");
+    return;
+  }
+  if(img->x >= canv->bg_image->w || img->y >= canv->bg_image->h){
+    printf("ascii_canvas_draw_on error: out of bounds draw");
+  }
+
+  //resize_based_on_distance(canv, img);
+
+  for(int i = 0; i < img->h; i++){
+    if(i+img->y >= canv->bg_image->h){
+      break;
+    }
+    for(int j = 0; j < img->w; j++){
+      if(j+img->x >= canv->bg_image->w){
+        break;
+      }
+
+
+      // Don't override brightness level
+      // so background can be saved
+      int br_bg = ascii_canvas_get_brightness_lv(canv->bg_image->ch_m[i+img->y][j+img->x]);
+      int br_img = ascii_canvas_get_brightness_lv(img->ch_m[i][j]);
+      if(br_bg > br_img){
+        continue;
+      }
+
+      canv->bg_image->ch_m[i+img->y][j+img->x] = img->ch_m[i][j];
+    }
+  }
+}
+
+void ascii_canvas_add_img(struct ascii_canvas *canv, struct char_gif *img){
+  canv->images_count++;
+  struct char_gif **new_img_l;
+  new_img_l = realloc(canv->images_list, canv->images_count*sizeof(struct char_gif*));
+  if(!new_img_l){
+    printf("realloc: failed to allocate memory");
+    return;
+  }
+  canv->images_list = new_img_l;
+  canv->images_list[canv->images_count-1] = img;
+}
+
+void ascii_canvas_progress_scene(struct ascii_canvas* canv){
+  for(int i = 0 ; i < canv->images_count; i++){
+      struct char_gif *ch_i = canv->images_list[i];
+      char_img_next_frame(ch_i);
+      ascii_canvas_draw_on(canv, ch_i); 
+  }
+}
+
+void ascii_canvas_print(struct ascii_canvas *canv){
+    //bitmap cropping to termianal size
+    uint32_t w_drw_lim = canv->bg_image->w;
+    uint32_t h_drw_lim = canv->bg_image->h;
+    if(canv->bg_image->w > COLS){
+        w_drw_lim = COLS;
+    }
+    if(canv->bg_image->h > LINES){
+        h_drw_lim = LINES;
+    }
+
+    for(int i = 0; i < h_drw_lim; i++){
+        for(int j = 0; j < w_drw_lim; j++){
+            printw("%c", canv->bg_image->ch_m[i][j]);
+        }
+    }
+
+    for(int i = 0; i < canv->images_count; i++){
+      struct char_gif *ch_i = canv->images_list[i];
+      ascii_canvas_draw_on(canv, ch_i); 
+    }
+} 
+
+void ascii_canvas_free(struct ascii_canvas *canv){
+  for(int i = 0; i < canv->images_count; i++){
+    char_img_free(canv->images_list[i]);
+  }
+  char_img_free(canv->bg_image);
+
+  free(canv);
+}
+
 struct char_gif *char_img_new_from_file(char *filename){
   struct char_gif *ch_img = malloc(sizeof(struct char_gif));
 
@@ -180,15 +243,18 @@ struct char_gif *char_img_new_from_file(char *filename){
   ch_img->w = first_frame->columns;
   ch_img->h = first_frame->rows;
   ch_img->id = (int)100*rand();
+
+	ch_img->x = 0;
+	ch_img->y = 0;
+  ch_img->xR = 0;
+  ch_img->yR = 0;
+	ch_img->zR = view_plane_z;
   
   return ch_img;
 }
 
 void char_img_free(struct char_gif* ch_i){
-  for(int i = 0; i < ch_i->h; i++){
-    free(ch_i->ch_m[i]);
-  }
-  free(ch_i->ch_m);
+  char_gif_free_current_char_map(ch_i);
 
   //frame_list_free(ch_i->fl);
 
@@ -202,10 +268,7 @@ void char_img_next_frame(struct char_gif *ch_i){
     return;
   }
 
-  for(int i = 0; i < ch_i->h; i++){
-    free(ch_i->ch_m[i]);
-  }
-  free(ch_i->ch_m);
+  char_gif_free_current_char_map(ch_i);
 
   char **new_ch_m = char_map_new_from_image(next_frame);
 
