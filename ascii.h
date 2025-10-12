@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <ncurses.h>
+#include <stdbool.h>
 
 #include "image.h"
 
@@ -22,6 +23,7 @@ struct char_gif {
   int xR; //real x
   int yR; //real y
 	int zR; //real z
+	bool resized;
 };
 
 struct ascii_canvas {
@@ -42,6 +44,8 @@ void ascii_canvas_draw_on(
   struct ascii_canvas *canv,
   struct char_gif *img
 );
+
+
 
 void char_img_next_frame(struct char_gif *ch_i);
 

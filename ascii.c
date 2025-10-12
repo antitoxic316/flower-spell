@@ -9,7 +9,7 @@
 char ascii_br[10] = {' ','.',':','-','=','+','*','#','%','@'};
 int horizon_line = 18;
 
-int view_plane_z = 12;
+int view_plane_z = 6;
 
 int ascii_canvas_get_brightness_lv(char ch){
   int br = -1;
@@ -32,6 +32,10 @@ char **char_map_new_from_image(Image *img){
   ex = AcquireExceptionInfo();
 
   char **ch_m = malloc(sizeof(char*) * img->rows);
+
+	FILE *f = fopen("log2.txt", "a");
+	fprintf(f, "allocated char map with %d rows and %d columns\n", img->rows, img->columns);
+	fclose(f);
 
   for(int i = 0; i < img->rows; i++){
       char *initiated_line = calloc(img->columns, sizeof(char));
@@ -101,29 +105,46 @@ double vecLen(int x1, int y1, int z1, int x2, int y2, int z2){
 
 void resize_based_on_distance(struct ascii_canvas *canv, struct char_gif *img){
   ExceptionInfo *ex;
+  Image *new_img_list;
   int persp_h;
+
+	if(img->resized) return; // quick hack
 
   ex = AcquireExceptionInfo();
 
-  persp_h = ceil(((double)(img->h * view_plane_z)) / vecLen(
-    0, canv->viewerX, 0, img->xR, img->yR, img->zR
-  ));
+  persp_h = ceil(((double)(img->h * view_plane_z)) / 
+    vecLen(canv->viewerX, 0, 0, img->xR, img->yR, img->zR));
 
-  img->h = (int)persp_h;
-  
+	FILE *f;
+
+	f = fopen("log.txt", "a");
+	fprintf(f, "canvX: %d, xR: %d, yR: %d, zR: %d\n", canv->viewerX, img->xR, img->yR, img->zR);
+	fprintf(f, "res_h: %d, img->h/vpz: %d, veclen: %f\n", persp_h, img->h*view_plane_z, vecLen(0, canv->viewerX, 0, img->xR, img->yR, img->zR));
+  fclose(f);
+
+  new_img_list = NewImageList();
+
 	for(int i = 0; i < img->fl->frame_count; i++){
     Image *pxl = GetImageFromList(img->fl->frames, i);
-    pxl = ResizeImage(pxl, img->w, img->h, BohmanFilter, ex);
-    if (!pxl){
+    pxl = ResizeImage(pxl, img->w, persp_h, BoxFilter, ex);
+    if (!img->fl->frames){
       MagickError(ex->severity,ex->reason,ex->description);
       exit(1);
     }
-
-    char **ch_m_new = char_map_new_from_image(pxl);
-    char_gif_free_current_char_map(img);
-
-    img->ch_m = ch_m_new;
+    AppendImageToList(&new_img_list, pxl);
+    if(i == img->fl->frame_i){
+      char **ch_m_new = char_map_new_from_image(pxl);
+      char_gif_free_current_char_map(img);
+      
+      img->h = pxl->rows;
+      img->ch_m = ch_m_new;
+    }
   }
+
+  DestroyImageList(img->fl->frames);
+  img->fl->frames = new_img_list;
+
+	img->resized = true;
 }
 
 void char_gif_move(struct ascii_canvas* canv, struct char_gif *chg, int x, int y){
@@ -137,9 +158,11 @@ void char_gif_move(struct ascii_canvas* canv, struct char_gif *chg, int x, int y
   if(y > horizon_line){ //the object is on the ground
     chg->yR = 0;
     int obj_d = (canv->bg_image->h - y);
-    chg->zR = pow(obj_d, 2);
+    chg->zR = obj_d;
 
-    int realOffsetX = chg->zR * (x - canv->viewerX) / view_plane_z;
+    //int realOffsetX = chg->zR * (x - canv->viewerX) / view_plane_z;
+	
+		int realOffsetX = 0;
 
     chg->xR = canv->viewerX - realOffsetX;
   }
@@ -155,7 +178,7 @@ void ascii_canvas_draw_on(struct ascii_canvas *canv, struct char_gif *img)
     printf("ascii_canvas_draw_on error: out of bounds draw");
   }
 
-  //resize_based_on_distance(canv, img);
+  resize_based_on_distance(canv, img);
 
   for(int i = 0; i < img->h; i++){
     if(i+img->y >= canv->bg_image->h){
@@ -249,7 +272,9 @@ struct char_gif *char_img_new_from_file(char *filename){
   ch_img->xR = 0;
   ch_img->yR = 0;
 	ch_img->zR = view_plane_z;
-  
+ 
+	ch_img->resized = false;
+
   return ch_img;
 }
 
@@ -262,6 +287,10 @@ void char_img_free(struct char_gif* ch_i){
 }
 
 void char_img_next_frame(struct char_gif *ch_i){
+  FILE *f = fopen("log2.txt", "a");
+	fprintf(f, "turning frame on image at %d %d\n", ch_i->x, ch_i->y);
+  fclose(f);
+
   Image *next_frame = frame_list_turn_frame(ch_i->fl);
   
   if(!next_frame){
@@ -274,3 +303,4 @@ void char_img_next_frame(struct char_gif *ch_i){
 
   ch_i->ch_m = new_ch_m;
 }
+
